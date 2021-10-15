@@ -723,14 +723,14 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
 
     // internal logger for ContainerRuntime. Use this.logger for stores, summaries, etc.
     private readonly _logger: ITelemetryLogger;
-    private readonly summarizerClientElection: SummarizerClientElection;
+    private readonly summarizerClientElection?: SummarizerClientElection;
     /**
      * summaryManager will only be created if this client is permitted to spawn a summarizing client
      * It is created only by interactive client, i.e. summarizer client, as well as non-interactive bots
      * do not create it (see SummarizerClientElection.clientDetailsPermitElection() for details)
      */
-    private readonly summaryManager: SummaryManager | undefined;
-    private readonly summaryCollection: SummaryCollection;
+    private readonly summaryManager?: SummaryManager;
+    private readonly summaryCollection?: SummaryCollection;
 
     private readonly summarizerNode: IRootSummarizerNodeWithGC;
 
@@ -749,7 +749,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
 
     /** clientId of parent (non-summarizing) container that owns summarizer container */
     public get summarizerClientId(): string | undefined {
-        return this.summarizerClientElection.electedClientId;
+        return this.summarizerClientElection?.electedClientId;
     }
 
     private get summaryConfiguration() {
@@ -950,50 +950,54 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
             }
         });
 
-        this.summaryCollection = new SummaryCollection(this.deltaManager, this.logger);
-        const maxOpsSinceLastSummary = this.runtimeOptions.summaryOptions.maxOpsSinceLastSummary ?? 7000;
-        const defaultAction = () => {
-            if (this.summaryCollection.opsSinceLastAck > maxOpsSinceLastSummary) {
-                this.logger.sendErrorEvent({eventName: "SummaryStatus:Behind"});
-                // unregister default to no log on every op after falling behind
-                // and register summary ack handler to re-register this handler
-                // after successful summary
-                this.summaryCollection.once(MessageType.SummaryAck, () => {
-                    this.logger.sendTelemetryEvent({eventName: "SummaryStatus:CaughtUp"});
-                    // we've caught up, so re-register the default action to monitor for
-                    // falling behind, and unregister ourself
-                    this.summaryCollection.on("default", defaultAction);
-                });
-                this.summaryCollection.off("default", defaultAction);
-            }
-        };
-        this.summaryCollection.on("default", defaultAction);
-
-        const orderedClientLogger = ChildLogger.create(this.logger, "OrderedClientElection");
-        const orderedClientCollection = new OrderedClientCollection(
-            orderedClientLogger,
-            this.context.deltaManager,
-            this.context.quorum,
-        );
-        const orderedClientElectionForSummarizer = new OrderedClientElection(
-            orderedClientLogger,
-            orderedClientCollection,
-            electedSummarizerData ?? this.context.deltaManager.lastSequenceNumber,
-            SummarizerClientElection.isClientEligible,
-        );
-        const summarizerClientElectionEnabled = getLocalStorageFeatureGate("summarizerClientElection") ??
-            this.runtimeOptions.summaryOptions?.summarizerClientElection === true;
-        this.summarizerClientElection = new SummarizerClientElection(
-            orderedClientLogger,
-            this.summaryCollection,
-            orderedClientElectionForSummarizer,
-            maxOpsSinceLastSummary,
-            summarizerClientElectionEnabled,
-        );
         // Only create a SummaryManager if summaries are enabled and we are not the summarizer client
         if (this.runtimeOptions.summaryOptions.generateSummaries === false) {
             this._logger.sendTelemetryEvent({ eventName: "SummariesDisabled" });
         } else {
+            this.summaryCollection = new SummaryCollection(this.deltaManager, this.logger);
+            const maxOpsSinceLastSummary = this.runtimeOptions.summaryOptions.maxOpsSinceLastSummary ?? 7000;
+            const defaultAction = () => {
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                if (this.summaryCollection!.opsSinceLastAck > maxOpsSinceLastSummary) {
+                    this.logger.sendErrorEvent({eventName: "SummaryStatus:Behind"});
+                    // unregister default to no log on every op after falling behind
+                    // and register summary ack handler to re-register this handler
+                    // after successful summary
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    this.summaryCollection!.once(MessageType.SummaryAck, () => {
+                        this.logger.sendTelemetryEvent({eventName: "SummaryStatus:CaughtUp"});
+                        // we've caught up, so re-register the default action to monitor for
+                        // falling behind, and unregister ourself
+                        this.summaryCollection?.on("default", defaultAction);
+                    });
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    this.summaryCollection!.off("default", defaultAction);
+                }
+            };
+
+            this.summaryCollection.on("default", defaultAction);
+                const orderedClientLogger = ChildLogger.create(this.logger, "OrderedClientElection");
+            const orderedClientCollection = new OrderedClientCollection(
+                orderedClientLogger,
+                this.context.deltaManager,
+                this.context.quorum,
+            );
+            const orderedClientElectionForSummarizer = new OrderedClientElection(
+                orderedClientLogger,
+                orderedClientCollection,
+                electedSummarizerData ?? this.context.deltaManager.lastSequenceNumber,
+                SummarizerClientElection.isClientEligible,
+            );
+            const summarizerClientElectionEnabled = getLocalStorageFeatureGate("summarizerClientElection") ??
+                this.runtimeOptions.summaryOptions?.summarizerClientElection === true;
+            this.summarizerClientElection = new SummarizerClientElection(
+                orderedClientLogger,
+                this.summaryCollection,
+                orderedClientElectionForSummarizer,
+                maxOpsSinceLastSummary,
+                summarizerClientElectionEnabled,
+            );
+
             if (this.context.clientDetails.type === summarizerClientType) {
                 this._summarizer = new Summarizer(
                     "/_summarizer",
@@ -1256,6 +1260,12 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     }
 
     private addContainerBlobsToSummary(summaryTree: ISummaryTreeWithStats) {
+        if (!this.summarizerClientElection) {
+            throw new Error(
+                `Can't summarize, generateSummaries: ${this.runtimeOptions.summaryOptions.generateSummaries}`,
+            );
+        }
+
         if (this.shouldWriteMetadata) {
             addBlobToSummary(summaryTree, metadataBlobName, JSON.stringify(this.formMetadata()));
         }
@@ -1263,6 +1273,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
             const content = JSON.stringify([...this.chunkMap]);
             addBlobToSummary(summaryTree, chunksBlobName, content);
         }
+
         const electedSummarizerContent = JSON.stringify(this.summarizerClientElection.serialize());
         addBlobToSummary(summaryTree, electedSummarizerBlobName, electedSummarizerContent);
 
@@ -1780,7 +1791,11 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
      */
     public async submitSummary(options: ISubmitSummaryOptions): Promise<SubmitSummaryResult> {
         const { fullTree, refreshLatestAck, summaryLogger } = options;
-
+        if (!this.summaryCollection) {
+            throw new Error(
+                `Can't summarize, generateSummaries: ${this.runtimeOptions.summaryOptions.generateSummaries}`,
+            );
+        }
         if (refreshLatestAck) {
             const latestSummaryRefSeq = await this.refreshLatestSummaryAckFromServer(
                 ChildLogger.create(summaryLogger, undefined, { all: { safeSummary: true } }));
