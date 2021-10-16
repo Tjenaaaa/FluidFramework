@@ -950,54 +950,54 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
             }
         });
 
-        // Only create a SummaryManager if summaries are enabled and we are not the summarizer client
+        this.summaryCollection = new SummaryCollection(this.deltaManager, this.logger);
+        const maxOpsSinceLastSummary = this.runtimeOptions.summaryOptions.maxOpsSinceLastSummary ?? 7000;
+        const defaultAction = () => {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            if (this.summaryCollection!.opsSinceLastAck > maxOpsSinceLastSummary) {
+                this.logger.sendErrorEvent({eventName: "SummaryStatus:Behind"});
+                // unregister default to no log on every op after falling behind
+                // and register summary ack handler to re-register this handler
+                // after successful summary
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                this.summaryCollection!.once(MessageType.SummaryAck, () => {
+                    this.logger.sendTelemetryEvent({eventName: "SummaryStatus:CaughtUp"});
+                    // we've caught up, so re-register the default action to monitor for
+                    // falling behind, and unregister ourself
+                    this.summaryCollection?.on("default", defaultAction);
+                });
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                this.summaryCollection!.off("default", defaultAction);
+            }
+        };
+
+        this.summaryCollection.on("default", defaultAction);
+            const orderedClientLogger = ChildLogger.create(this.logger, "OrderedClientElection");
+        const orderedClientCollection = new OrderedClientCollection(
+            orderedClientLogger,
+            this.context.deltaManager,
+            this.context.quorum,
+        );
+        const orderedClientElectionForSummarizer = new OrderedClientElection(
+            orderedClientLogger,
+            orderedClientCollection,
+            electedSummarizerData ?? this.context.deltaManager.lastSequenceNumber,
+            SummarizerClientElection.isClientEligible,
+        );
+        const summarizerClientElectionEnabled = getLocalStorageFeatureGate("summarizerClientElection") ??
+            this.runtimeOptions.summaryOptions?.summarizerClientElection === true;
+        this.summarizerClientElection = new SummarizerClientElection(
+            orderedClientLogger,
+            this.summaryCollection,
+            orderedClientElectionForSummarizer,
+            maxOpsSinceLastSummary,
+            summarizerClientElectionEnabled,
+        );
+
+    // Only create a SummaryManager if summaries are enabled and we are not the summarizer client
         if (this.runtimeOptions.summaryOptions.generateSummaries === false) {
             this._logger.sendTelemetryEvent({ eventName: "SummariesDisabled" });
         } else {
-            this.summaryCollection = new SummaryCollection(this.deltaManager, this.logger);
-            const maxOpsSinceLastSummary = this.runtimeOptions.summaryOptions.maxOpsSinceLastSummary ?? 7000;
-            const defaultAction = () => {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                if (this.summaryCollection!.opsSinceLastAck > maxOpsSinceLastSummary) {
-                    this.logger.sendErrorEvent({eventName: "SummaryStatus:Behind"});
-                    // unregister default to no log on every op after falling behind
-                    // and register summary ack handler to re-register this handler
-                    // after successful summary
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    this.summaryCollection!.once(MessageType.SummaryAck, () => {
-                        this.logger.sendTelemetryEvent({eventName: "SummaryStatus:CaughtUp"});
-                        // we've caught up, so re-register the default action to monitor for
-                        // falling behind, and unregister ourself
-                        this.summaryCollection?.on("default", defaultAction);
-                    });
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    this.summaryCollection!.off("default", defaultAction);
-                }
-            };
-
-            this.summaryCollection.on("default", defaultAction);
-                const orderedClientLogger = ChildLogger.create(this.logger, "OrderedClientElection");
-            const orderedClientCollection = new OrderedClientCollection(
-                orderedClientLogger,
-                this.context.deltaManager,
-                this.context.quorum,
-            );
-            const orderedClientElectionForSummarizer = new OrderedClientElection(
-                orderedClientLogger,
-                orderedClientCollection,
-                electedSummarizerData ?? this.context.deltaManager.lastSequenceNumber,
-                SummarizerClientElection.isClientEligible,
-            );
-            const summarizerClientElectionEnabled = getLocalStorageFeatureGate("summarizerClientElection") ??
-                this.runtimeOptions.summaryOptions?.summarizerClientElection === true;
-            this.summarizerClientElection = new SummarizerClientElection(
-                orderedClientLogger,
-                this.summaryCollection,
-                orderedClientElectionForSummarizer,
-                maxOpsSinceLastSummary,
-                summarizerClientElectionEnabled,
-            );
-
             if (this.context.clientDetails.type === summarizerClientType) {
                 this._summarizer = new Summarizer(
                     "/_summarizer",
