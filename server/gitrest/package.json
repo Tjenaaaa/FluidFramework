@@ -23,7 +23,7 @@
   "dependencies": {
     "@fluidframework/common-utils": "^0.31.0-0",
     "@fluidframework/gitresources": "^0.1032.0-38847",
-    "@fluidframework/server-services": "^0.1025.0-0",
+    "@fluidframework/server-services": "^0.1038.2000",
     "@fluidframework/server-services-client": "^0.1025.0-0",
     "@fluidframework/server-services-core": "^0.1025.0-0",
     "@fluidframework/server-services-shared": "^0.1025.0-0",
