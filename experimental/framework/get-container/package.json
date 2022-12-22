@@ -36,7 +36,7 @@
     "@fluidframework/server-local-server": "^0.1033.0-40116",
     "@fluidframework/test-runtime-utils": "^0.50.0",
     "@fluidframework/tinylicious-driver": "^0.50.0",
-    "jsonwebtoken": "^8.4.0"
+    "jsonwebtoken": "^9.0.0"
   },
   "devDependencies": {
     "@fluidframework/build-common": "^0.23.0",

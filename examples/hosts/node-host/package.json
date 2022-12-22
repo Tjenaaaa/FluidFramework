@@ -32,7 +32,7 @@
     "@fluidframework/routerlicious-driver": "^0.50.0",
     "@fluidframework/routerlicious-host": "^0.50.0",
     "@fluidframework/test-runtime-utils": "^0.50.0",
-    "jsonwebtoken": "^8.4.0",
+    "jsonwebtoken": "^9.0.0",
     "uuid": "^8.3.1"
   },
   "devDependencies": {
